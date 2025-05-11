@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>ログJSONビューワー</title>
+  <title>ログJSONビューワー（1件のみ残す）</title>
   <style>
     body { font-family: sans-serif; margin: 20px; }
     #dropZone {
@@ -21,7 +21,7 @@
 </head>
 <body>
 
-  <h1>ログファイル解析ツール</h1>
+  <h1>ログファイル解析ツール（連続アクセス → 先頭のみ残す）</h1>
   <div id="dropZone">ここにJSONファイルをドロップしてください</div>
   <button id="downloadCsv" disabled>CSVでダウンロード</button>
 
@@ -61,27 +61,59 @@
       dropZone.style.backgroundColor = '#f9f9f9';
       const file = e.dataTransfer.files[0];
       if (!file) return;
+
       const reader = new FileReader();
       reader.onload = function (event) {
         try {
-          const data = JSON.parse(event.target.result);
+          const rawData = JSON.parse(event.target.result);
+          const parsed = rawData.map(entry => {
+            const timestamp = new Date(entry.timestamp);
+            return {
+              day: timestamp.toISOString().split('T')[0],
+              time: timestamp.toISOString().split('T')[1].split('Z')[0],
+              epochMs: timestamp.getTime(),
+              nation: entry.jsonPayload?.remoteIpCountry || '',
+              city: entry.jsonPayload?.remoteIpCity || '',
+              ip: entry.httpRequest?.remoteIp || '',
+              url: entry.httpRequest?.requestUrl || '',
+              referer: entry.httpRequest?.referer || '',
+              ua: entry.httpRequest?.userAgent || ''
+            };
+          });
+
+          parsed.sort((a, b) => a.epochMs - b.epochMs);
+
+          const cleaned = [];
+          const grouped = {};
+
+          // グループ化
+          for (const log of parsed) {
+            const key = `${log.ip}|${log.url}`;
+            if (!grouped[key]) grouped[key] = [];
+            grouped[key].push(log);
+          }
+
+          // 各グループごとに：連続群の最初だけ残す
+          for (const key in grouped) {
+            const logs = grouped[key];
+            let i = 0;
+            while (i < logs.length) {
+              const current = logs[i];
+              let j = i + 1;
+              while (j < logs.length && logs[j].epochMs - logs[j - 1].epochMs <= 1100) {
+                j++;
+              }
+              // i〜j-1までが1グループ（連続アクセス）
+              cleaned.push(logs[i]); // 先頭のみ残す
+              i = j;
+            }
+          }
+
           tbody.innerHTML = '';
           extractedData = [];
-
-          data.forEach(entry => {
-            const timestamp = new Date(entry.timestamp);
-            const day = timestamp.toISOString().split('T')[0];
-            const time = timestamp.toISOString().split('T')[1].split('Z')[0];
-            const nation = entry.jsonPayload?.remoteIpCountry || '';
-            const city = entry.jsonPayload?.remoteIpCity || '';
-            const ip = entry.httpRequest?.remoteIp || '';
-            const url = entry.httpRequest?.requestUrl || '';
-            const referer = entry.httpRequest?.referer || '';
-            const ua = entry.httpRequest?.userAgent || '';
-
-            const row = [day, time, nation, city, ip, url, referer, ua];
+          cleaned.forEach(log => {
+            const row = [log.day, log.time, log.nation, log.city, log.ip, log.url, log.referer, log.ua];
             extractedData.push(row);
-
             const tr = document.createElement('tr');
             row.forEach(text => {
               const td = document.createElement('td');
@@ -102,14 +134,14 @@
     downloadBtn.addEventListener('click', () => {
       const headers = ['Day', 'Time', 'Nation', 'City', 'IP', 'Request URL', 'Referer', 'User Agent'];
       const csvContent = [headers, ...extractedData]
-        .map(e => e.map(val => `"${(val || '').replace(/"/g, '""')}"`).join(','))
+        .map(row => row.map(val => `"${(val || '').replace(/"/g, '""')}"`).join(','))
         .join('\n');
 
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'log_data.csv';
+      a.download = 'log_data_filtered.csv';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
