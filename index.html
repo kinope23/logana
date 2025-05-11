@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>ログJSONビューワー</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    #dropZone {
+      border: 2px dashed #999;
+      padding: 30px;
+      text-align: center;
+      color: #666;
+      background-color: #f9f9f9;
+      margin-bottom: 20px;
+    }
+    table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; font-size: 12px; }
+    th { background-color: #f2f2f2; }
+    button { margin-top: 10px; padding: 8px 12px; font-size: 14px; }
+  </style>
+</head>
+<body>
+
+  <h1>ログファイル解析ツール</h1>
+  <div id="dropZone">ここにJSONファイルをドロップしてください</div>
+  <button id="downloadCsv" disabled>CSVでダウンロード</button>
+
+  <table id="logTable">
+    <thead>
+      <tr>
+        <th>Day</th>
+        <th>Time</th>
+        <th>Nation</th>
+        <th>City</th>
+        <th>IP</th>
+        <th>Request URL</th>
+        <th>Referer</th>
+        <th>User Agent</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <script>
+    const dropZone = document.getElementById('dropZone');
+    const tbody = document.querySelector('#logTable tbody');
+    const downloadBtn = document.getElementById('downloadCsv');
+    let extractedData = [];
+
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.style.backgroundColor = '#e0f7fa';
+    });
+
+    dropZone.addEventListener('dragleave', () => {
+      dropZone.style.backgroundColor = '#f9f9f9';
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.style.backgroundColor = '#f9f9f9';
+      const file = e.dataTransfer.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function (event) {
+        try {
+          const data = JSON.parse(event.target.result);
+          tbody.innerHTML = '';
+          extractedData = [];
+
+          data.forEach(entry => {
+            const timestamp = new Date(entry.timestamp);
+            const day = timestamp.toISOString().split('T')[0];
+            const time = timestamp.toISOString().split('T')[1].split('Z')[0];
+            const nation = entry.jsonPayload?.remoteIpCountry || '';
+            const city = entry.jsonPayload?.remoteIpCity || '';
+            const ip = entry.httpRequest?.remoteIp || '';
+            const url = entry.httpRequest?.requestUrl || '';
+            const referer = entry.httpRequest?.referer || '';
+            const ua = entry.httpRequest?.userAgent || '';
+
+            const row = [day, time, nation, city, ip, url, referer, ua];
+            extractedData.push(row);
+
+            const tr = document.createElement('tr');
+            row.forEach(text => {
+              const td = document.createElement('td');
+              td.textContent = text;
+              tr.appendChild(td);
+            });
+            tbody.appendChild(tr);
+          });
+
+          downloadBtn.disabled = false;
+        } catch (err) {
+          alert('ファイルの読み込みに失敗しました。JSON形式か確認してください。');
+        }
+      };
+      reader.readAsText(file);
+    });
+
+    downloadBtn.addEventListener('click', () => {
+      const headers = ['Day', 'Time', 'Nation', 'City', 'IP', 'Request URL', 'Referer', 'User Agent'];
+      const csvContent = [headers, ...extractedData]
+        .map(e => e.map(val => `"${(val || '').replace(/"/g, '""')}"`).join(','))
+        .join('\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'log_data.csv';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    });
+  </script>
+
+</body>
+</html>
